@@ -137,6 +137,11 @@
       "value": "yes",
       "required": false
     },
+    "ANTILINK_GROUP": {
+      "description": "Automatically detect incoming links on your group and delete the link automatically",
+      "value": "yes",
+      "required": false
+    },
     "AUTO_BLOCK": {
       "description": "Type true if you want bot to automatically  block those who spam your dm ",
       "value": "no",
