@@ -40,6 +40,7 @@ module.exports = { session: process.env.SESSION_ID || 'hans',
     ETAT : process.env.PRESENCE || '1',
     DP : process.env.STARTING_BOT_MESSAGE || "yes",
     ADM : process.env.ANTI_DELETE_MESSAGE || 'no',
+    ANTILINK_GROUP : process.env.ANTILINK_GROUP || 'yes',              
     ANTICALL: process.env.ANTICALL || 'yes',              
     DATABASE_URL,
     DATABASE: DATABASE_URL === databasePath
