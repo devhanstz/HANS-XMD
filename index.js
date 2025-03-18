@@ -103,27 +103,40 @@ require('dotenv').config({
   'path': "./config.env"
 });
 async function authentification() {
-  try {
-    //console.log("le data "+data)
-    if (!fs.existsSync(__dirname + "/auth/creds.json")) {
-      console.log("connected successfully...");
-      await fs.writeFileSync(__dirname + "/auth/creds.json", atob(session), "utf8");
-      //console.log(session)
-    } else if (fs.existsSync(__dirname + "/auth/creds.json") && session != "zokk") {
-      await fs.writeFileSync(__dirname + "/auth/creds.json", atob(session), "utf8");
+    try {
+        if (!fs.existsSync(__dirname + "/auth/creds.json")) {
+            console.log("Session connected...");
+            // Split the session string into header and Base64 data
+            const [header, b64data] = conf.session.split(';;;'); 
+
+            // Validate the session format
+            if (header === "HANS-TZ" && b64data) {
+                let compressedData = Buffer.from(b64data.replace('...', ''), 'base64'); // Decode and truncate
+                let decompressedData = zlib.gunzipSync(compressedData); // Decompress session
+                fs.writeFileSync(__dirname + "/auth/creds.json", decompressedData, "utf8"); // Save to file
+            } else {
+                throw new Error("Invalid session format");
+            }
+        } else if (fs.existsSync(__dirname + "/auth/creds.json") && conf.session !== "zokk") {
+            console.log("Updating existing session...");
+            const [header, b64data] = conf.session.split(';;;'); 
+
+            if (header === "HANS-TZ" && b64data) {
+                let compressedData = Buffer.from(b64data.replace('...', ''), 'base64');
+                let decompressedData = zlib.gunzipSync(compressedData);
+                fs.writeFileSync(__dirname + "/auth/creds.json", decompressedData, "utf8");
+            } else {
+                throw new Error("Invalid session format");
+            }
+        }
+    } catch (e) {
+        console.log("Session Invalid: " + e.message);
+        return;
     }
-  } catch (e) {
-    console.log("Session Invalid " + e);
-    return;
-  }
 }
 authentification();
-0;
-const store = baileys_1.makeInMemoryStore({
-  logger: pino().child({
-    level: "silent",
-    stream: "store"
-  })
+const store = (0, baileys_1.makeInMemoryStore)({
+    logger: pino().child({ level: "silent", stream: "store" }),
 });
 setTimeout(() => {
   async function main() {
@@ -484,6 +497,147 @@ zk.ev.on("messages.upsert", async m => {
   }
 });
     
+const googleTTS = require('google-tts-api');
+const ai = require('unlimited-ai');
+
+zk.ev.on("messages.upsert", async (m) => {
+  const { messages } = m;
+  const ms = messages[0];
+
+  if (!ms.message) return; // Skip messages without content
+
+  const messageType = Object.keys(ms.message)[0];
+  const remoteJid = ms.key.remoteJid;
+  const messageContent = ms.message.conversation || ms.message.extendedTextMessage?.text;
+
+  // Skip bot's own messages and bot-owner messages
+  if (ms.key.fromMe || remoteJid === conf.NUMERO_OWNER + "@s.whatsapp.net") return;
+
+  // Check if chatbot feature is enabled
+  if (conf.VOICE_CHATBOT !== "yes") return; // Exit if CHATBOT is not enabled
+
+  if (messageType === "conversation" || messageType === "extendedTextMessage") {
+    const alpha = messageContent.trim();
+
+    if (!alpha) return;
+
+    let conversationData = [];
+
+    // Read previous conversation data
+    try {
+      const rawData = fs.readFileSync('store.json', 'utf8');
+      if (rawData) {
+        conversationData = JSON.parse(rawData);
+        if (!Array.isArray(conversationData)) {
+          conversationData = [];
+        }
+      }
+    } catch (err) {
+      console.log('No previous conversation found, starting new one.');
+    }
+
+    const model = 'gpt-4-turbo-2024-04-09';
+    const userMessage = { role: 'user', content: alpha };  
+    const systemMessage = { role: 'system', content: 'You are called Hans md. Developed by HansTz From Tanzania Dodoma City. You respond to user commands. Only mention developer name if someone asks.' };
+
+    // Add user message and system message to the conversation
+    conversationData.push(userMessage);
+    conversationData.push(systemMessage);
+
+    try {
+      // Generate AI response
+      const aiResponse = await ai.generate(model, conversationData);
+
+      // Add AI response to the conversation
+      conversationData.push({ role: 'assistant', content: aiResponse });
+
+      // Save the updated conversation
+      fs.writeFileSync('store.json', JSON.stringify(conversationData, null, 2));
+
+      // Convert AI response to audio
+      const audioUrl = googleTTS.getAudioUrl(aiResponse, {
+        lang: 'en',
+        slow: false,
+        host: 'https://translate.google.com',
+      });
+
+      // Send the audio response using zk.sendMessage
+      await zk.sendMessage(remoteJid, { 
+        audio: { url: audioUrl }, 
+        mimetype: 'audio/mp4', 
+        ptt: true 
+      });
+    } catch (error) {
+      // Silent error handling, no response to the user
+      console.error("Error with AI generation:", error);
+    }
+  }
+});
+
+zk.ev.on("messages.upsert", async (m) => {
+    const { messages } = m;
+    const ms = messages[0];
+
+    if (!ms.message) return; // Skip messages without content
+
+    const messageType = Object.keys(ms.message)[0];
+    const remoteJid = ms.key.remoteJid;
+    const messageContent = ms.message.conversation || ms.message.extendedTextMessage?.text;
+
+    // Skip bot's own messages and bot-owner messages
+    if (ms.key.fromMe || remoteJid === conf.NUMERO_OWNER + "@s.whatsapp.net") return;
+
+    // Handle CHATBOT for non-bot-owner messages
+    if (conf.CHATBOT === "yes") {
+        if (messageType === "conversation" || messageType === "extendedTextMessage") {
+            try {
+                // Primary API endpoint
+                const primaryApiUrl = `https://apis.ibrahimadams.us.kg/api/ai/gpt4?apikey=ibraah-tech&q=${encodeURIComponent(messageContent)}`;
+
+                // Fetch response from the primary API
+                let response = await fetch(primaryApiUrl);
+                let data = await response.json();
+
+                if (data && data.result) {
+                    const replyText = data.result;
+
+                    // Log the response
+                    console.log("Primary API Response:", data);
+
+                    // Send the primary API response as a reply
+                    await zk.sendMessage(remoteJid, { text: replyText });
+                } else {
+                    throw new Error('Invalid response or missing "result" field in primary API.');
+                }
+            } catch (primaryErr) {
+                console.error("Primary API Error:", primaryErr.message);
+
+                try {
+                    // Fallback API endpoint
+                    const fallbackApiUrl = `https://api.davidcyriltech.my.id/ai/chatbot?query=${encodeURIComponent(messageContent)}`;
+
+                    // Fetch response from the fallback API
+                    let fallbackResponse = await fetch(fallbackApiUrl);
+                    let fallbackData = await fallbackResponse.json();
+
+                    if (fallbackData && fallbackData.result) {
+                        const fallbackReplyText = fallbackData.result;
+
+                        // Log the response
+                        console.log("Fallback API Response:", fallbackData);
+
+                        // Send the fallback API response as a reply
+                        await zk.sendMessage(remoteJid, { text: fallbackReplyText });
+                    } else {
+                        console.warn("Fallback API returned no result.");
+                    }
+                } catch (fallbackErr) {
+                    console.error("Fallback API Error:", fallbackErr.message);
+                }
+            }
+        }
+    }
+});
 
 const isAnyLink = (message) => {
     // Regex pattern to detect any link
@@ -580,6 +734,112 @@ if (conf.AUTO_REACT === "yes") {
   });
 }
     
+// Map keywords to corresponding audio files
+const audioMap = {
+      'hey': 'files/hey.wav',
+      'hi': "files/hey.wav",
+      'hey': "files/hey.wav",
+      'he': 'files/hey.wav',
+      'hello': "files/hello.wav",
+      'mambo': "files/hey.wav",
+      'niaje': 'files/hey.wav',
+      'morning': "files/goodmorning.wav",
+      'goodmorning': "files/goodmorning.wav",
+      "weka up": 'files/goodmorning.wav',
+      'night': "files/goodnight.wav",
+      'goodnight': 'files/goodnight.wav',
+      'sleep': "files/goodnight.wav",
+      'oyaah': "files/mkuu.wav",
+      'mkuu': 'files/mkuu.wav',
+      'mahn': "files/mkuu.wav",
+      'owoh': "files/mkuu.wav",
+      'yoo': "files/mkuu.wav",
+      'wazii': "files/mkuu.wav",
+      'dev': 'files/Hanstz.wav',
+      'ibraah': "files/Hanstz.wav",
+      'ibrah': "files/Hanstz.wav",
+      'Hanstz': "files/Hanstz.wav",
+      'hans': "files/Hanstz.wav",
+      'bot': "files/bwm.mp3",
+      'bwm': 'files/bwm.mp3',
+      'xmd': "files/bwm.mp3",
+      'bmw': "files/bwm.mp3",
+      'md': "files/bwm.mp3",
+      "whatsapp bot": "files/bwm.mp3",
+      "bmw md": 'files/bwm.mp3',
+      'evening': "files/goodevening.wav",
+      'goodevening': 'files/goodevening.wav',
+      'darling': "files/darling.wav",
+      'beb': "files/darling.wav",
+      'mpenzi': 'files/darling.wav',
+      'afternoon': "files/goodafternoon.wav",
+      'jion': "files/goodafternoon.wav",
+      'kaka': 'files/kaka.wav',
+      'bro': 'files/morio.mp3',
+      'ndugu': "files/kaka.wav",
+      'morio': "files/morio.mp3",
+      'mzee': "files/morio.mp3",
+      'kijina': "files/mkuu.wav",
+      'mkuu': "files/mkuu.wav",
+      'ozah': "files/mkuu.wav",
+      'ozaah': 'files/mkuu.wav',
+      'oyaah': "files/mkuu.wav",
+      'oyah': 'files/mkuu.wav'
+    };
+    
+// Utility to get audio file path for a message
+const getAudioForSentence = (sentence) => {
+    const words = sentence.split(/\s+/); // Split sentence into words
+    for (const word of words) {
+        const audioFile = audioMap[word.toLowerCase()]; // Check each word in sentence
+        if (audioFile) return audioFile; // Return first matched audio file
+    }
+    return null; // Return null if no match
+};
+
+// Auto-reply with audio functionality
+if (conf.AUDIO_REPLY === "yes") {
+    console.log("AUTO_REPLY_AUDIO is enabled. Listening for messages...");
+
+    zk.ev.on("messages.upsert", async (m) => {
+        try {
+            const { messages } = m;
+
+            for (const message of messages) {
+                if (!message.key || !message.key.remoteJid) continue; // Ignore invalid messages
+                
+                const conversationText = message?.message?.conversation || "";
+                const audioFile = getAudioForSentence(conversationText);
+
+                if (audioFile) {
+                    try {
+                        // Check if the audio file exists
+                        await fs.access(audioFile);
+
+                        console.log(`Replying with audio: ${audioFile}`);
+                        await zk.sendMessage(message.key.remoteJid, {
+                            audio: { url: audioFile },
+                            mimetype: "audio/mp4",
+                            ptt: true
+                        });
+
+                        console.log(`Audio reply sent: ${audioFile}`);
+                    } catch (err) {
+                        console.error(`Error sending audio reply: ${err.message}`);
+                    }
+                } else {
+                    console.log("No matching keyword detected. Skipping message.");
+                }
+
+                // Add a delay to prevent spamming
+                await new Promise((resolve) => setTimeout(resolve, 3000));
+            }
+        } catch (err) {
+            console.error("Error in message processing:", err.message);
+        }
+    });
+}
+
 
 // Track the last reaction time to prevent overflow
 let lastReactionTime = 0;

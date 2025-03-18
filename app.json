@@ -27,6 +27,21 @@
       "value": "no",
       "required": false
     },
+    "VOICE_CHATBOT": {
+      "description": "when enabled it automatically Chat with Voice Note message",
+      "value": "no",
+      "required": false
+    },
+    "CHATBOT": {
+      "description": "when enabled it automatically Chat message",
+      "value": "no",
+      "required": false
+    },
+    "AUDIO_REPLY": {
+      "description": "when enabled it help you to reply witb Audio your chats",
+      "value": "no",
+      "required": false
+    },
     "AUTO_LIKE_STATUS": {
       "description": "Your contact status will be liked automatically (type 'yes' to activate or 'no' to deactivate; don't write in capital letters)",
       "value": "yes",
